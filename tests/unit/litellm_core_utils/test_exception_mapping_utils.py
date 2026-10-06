@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import openai
 import pytest
@@ -1037,6 +1039,95 @@ def test_an_unmapped_exception_with_no_model_or_provider_message_keeps_traceback
         )
 
     assert "Traceback (most recent call last)" in raised.value.message
+
+
+AIAND_ERROR_MESSAGE = "Insufficient credits. Review billing at https://console.aiand.com/settings/billing to continue."
+
+
+def test_an_aiand_error_maps_through_the_openai_compatible_path(quiet_exception_mapping):
+    from litellm.llms.base_llm.chat.transformation import BaseLLMException
+
+    original_exception = BaseLLMException(
+        status_code=402,
+        message=json.dumps(
+            {
+                "error": {
+                    "message": AIAND_ERROR_MESSAGE,
+                    "type": "billing_error",
+                    "param": None,
+                    "code": "insufficient_credits",
+                }
+            }
+        ),
+    )
+
+    with pytest.raises(litellm.APIError) as raised:
+        exception_type(
+            model="test-model",
+            original_exception=original_exception,
+            custom_llm_provider="aiand",
+        )
+
+    assert raised.value.status_code == 402
+    assert raised.value.llm_provider == "aiand"
+    assert raised.value.model == "test-model"
+    assert "AiandException - " in raised.value.message
+
+
+def test_an_aiand_401_maps_to_authentication_error(quiet_exception_mapping):
+    from litellm.llms.base_llm.chat.transformation import BaseLLMException
+
+    original_exception = BaseLLMException(
+        status_code=401,
+        message=json.dumps(
+            {
+                "error": {
+                    "message": "Missing or invalid API key",
+                    "type": "authentication_error",
+                    "param": None,
+                    "code": "invalid_api_key",
+                }
+            }
+        ),
+    )
+
+    with pytest.raises(litellm.AuthenticationError) as raised:
+        exception_type(
+            model="test-model",
+            original_exception=original_exception,
+            custom_llm_provider="aiand",
+        )
+
+    assert raised.value.status_code == 401
+    assert raised.value.llm_provider == "aiand"
+
+
+def test_an_aiand_404_maps_to_not_found_error(quiet_exception_mapping):
+    from litellm.llms.base_llm.chat.transformation import BaseLLMException
+
+    original_exception = BaseLLMException(
+        status_code=404,
+        message=json.dumps(
+            {
+                "error": {
+                    "message": "Model not found",
+                    "type": "invalid_request_error",
+                    "param": "model",
+                    "code": "model_not_found",
+                }
+            }
+        ),
+    )
+
+    with pytest.raises(litellm.NotFoundError) as raised:
+        exception_type(
+            model="test-model",
+            original_exception=original_exception,
+            custom_llm_provider="aiand",
+        )
+
+    assert raised.value.status_code == 404
+    assert raised.value.llm_provider == "aiand"
 
 
 CONTEXT_WINDOW_MESSAGE = "This model's maximum context length is 4096 tokens."
